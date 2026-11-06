@@ -35,6 +35,7 @@ MeowTM began as a university ATM assignment and was later reworked into a small 
 - Secondary PIN verification for transfers
 - Dynamic balance updates after transactions
 - DOS-style menus, cursor positioning, and timed messages
+- Optional **transaction receipts** (Y/N) for withdrawals, deposits and transfers, fed out line by line with a unique `MTM-0001` reference and a masked destination account
 - An epoch-era boot date of `1970-01-01 12:00:00 AM`
 
 ## Built with
@@ -115,18 +116,13 @@ Deposit parsing checks multiplication overflow while the number is being built. 
 
 - Data exists only for the current program session; there is no persistent storage.
 - The PIN and cardholder are hardcoded demonstration values.
-- Account numbers are validated as numeric input, but the current version accepts between 1 and 10 digits rather than requiring exactly 10.
-- Zero-value withdrawals and transfers are not rejected yet.
-- Some invalid-input messages say the session is terminated even when the program returns to a menu.
+- Receipts are shown on screen only; there is no transaction history yet.
 - This is an educational simulator, not real banking or security software.
 
 ## Planned improvements
 
-- Require exactly ten digits for destination accounts
-- Reject zero-value transactions
 - Add limited PIN retries
-- Make invalid-input messages match their actual navigation
-- Add transaction receipts and history
+- Add transaction history (receipts are done!)
 - Create a PawPay transfer option
 - Add screenshots or a short terminal GIF
 

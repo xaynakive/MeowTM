@@ -29,7 +29,8 @@
     
     ; System Messages
     exit_msg db 10,13,10,13,'Thank you for purring with us.$'
-    invalid_input db 10,13,'Invalid Input! Session Terminated.$'
+    invalid_input db 10,13,'Invalid input! Please try again.$'
+    zero_amount_msg db 10,13,'Amount must be greater than zero.$'
     newline db 10,13,'$'
     
     ; Balance Information
@@ -80,6 +81,36 @@
     ; Number conversion helpers
     ten dw 10
     hundred dw 100 
+
+    ; Transfer destination account (10 digits + terminator)
+    acc_buffer db 11 dup('$')
+
+    ; Receipt state (filled in by each successful transaction)
+    rcpt_type    dw 0          ; offset of the transaction-type string
+    rcpt_amount  dw 0          ; amount of the last transaction
+    rcpt_is_xfer db 0          ; 1 = show destination account line
+    rcpt_ref     dw 1          ; receipt counter, printed as MTM-0001
+
+    ; Transaction type labels
+    t_withdraw db 'WITHDRAWAL$'
+    t_deposit  db 'DEPOSIT$'
+    t_transfer db 'TRANSFER$'
+
+    ; Receipt text (printed one line at a time, like paper from a slot)
+    rc_ask    db 10,13,10,13,'Print receipt? (Y/N): $'
+    rc_edge   db 10,13,' ====================================$'
+    rc_title1 db 10,13,'       NEKO CHARTERED RECEIPT$'
+    rc_title2 db 10,13,'      ~ Meow Teller Machine ~$'
+    rc_rule   db 10,13,' ------------------------------------$'
+    rc_date   db 10,13,' Date    : 1970-01-01 12:00:00 AM$'
+    rc_card   db 10,13,' Card    : Xayna$'
+    rc_ref    db 10,13,' Ref     : MTM-$'
+    rc_type   db 10,13,' Type    : $'
+    rc_amount db 10,13,' Amount  : $'
+    rc_dest   db 10,13,' To Acct : ******$'
+    rc_bal    db 10,13,' Balance : $'
+    rc_thanks db 10,13,'   Thank you for purring with us.$'
+    rc_cat    db 10,13,'               =^.^=$' 
  .code   
 clear_screen proc
     push ax         ; Save registers
@@ -358,18 +389,26 @@ convert_loop:
     
     push bx              ; Save digit
     
-    mul ten              ; AX = AX * 10
+    mul ten              ; AX = AX * 10 (CF set if result overflowed)
     
-    pop bx
+    pop bx               ; POP does not touch flags
+    jc insufficient      ; too big for 16 bits -> certainly > balance
     add ax,bx            ; Add digit
+    jc insufficient
     
     inc si
     jmp convert_loop
     
 check_amount:
+    ; Reject zero-value withdrawals
+    cmp ax,0
+    je zero_withdraw
+    
     ; Check if amount <= current balance
     cmp ax, current_balance_value
     ja insufficient
+    
+    mov rcpt_amount, ax  ; remember for the receipt
     
     ; Subtract amount from balance
     mov bx, current_balance_value
@@ -402,7 +441,18 @@ check_amount:
     lea dx, header_line
     int 21h
     
+    mov rcpt_type, offset t_withdraw
+    mov rcpt_is_xfer, 0
+    call offer_receipt
     jmp option
+
+zero_withdraw:
+    call clear_screen
+    mov ah,9
+    lea dx,zero_amount_msg
+    int 21h
+    call wait_2s
+    jmp withdraw
     
 insufficient:
     call clear_screen
@@ -489,6 +539,8 @@ process_deposit:
     cmp ax,0
     je invalid_deposit
     
+    mov rcpt_amount,ax               ; remember for the receipt
+    
     ; Add to balance (overflow guard: reject if sum would pass 65,535)
     add ax,current_balance_value
     jc deposit_limit                 ; carry set = wrapped past 65,535, bail out
@@ -514,6 +566,9 @@ process_deposit:
     lea dx,header_line
     int 21h
     
+    mov rcpt_type, offset t_deposit
+    mov rcpt_is_xfer, 0
+    call offer_receipt
     jmp option
 
 deposit_limit:
@@ -544,15 +599,23 @@ invalid_deposit:
     
     jmp deposit
 
-; Helper procedure to display balance
+; Helper procedure to display the current balance
 format_balance proc
+    push ax
+    mov ax, current_balance_value
+    call format_number
+    pop ax
+    ret
+format_balance endp
+
+; Print the value in AX as 1,234 Shimmers
+format_number proc
     push ax
     push bx
     push cx
     push dx
     push si
     
-    mov ax, current_balance_value
     mov si, 0
     mov bx, 10
     
@@ -596,7 +659,177 @@ check_end:
     pop bx
     pop ax
     ret
-format_balance endp
+format_number endp
+
+; Wait ~2 seconds (BIOS INT 15h / AH=86h)
+wait_2s proc
+    push ax
+    push cx
+    push dx
+    mov cx,0Fh
+    mov dx,4240h
+    mov ah,86h
+    int 15h
+    pop dx
+    pop cx
+    pop ax
+    ret
+wait_2s endp
+
+; Wait ~120 ms so receipt lines "feed out" one by one
+paper_wait proc
+    push ax
+    push cx
+    push dx
+    mov cx,1
+    mov dx,0D4C0h       ; CX:DX = 120,000 microseconds
+    mov ah,86h
+    int 15h
+    pop dx
+    pop cx
+    pop ax
+    ret
+paper_wait endp
+
+; Print the $-terminated string at DX, then pause like a printer
+rc_print proc
+    push ax
+    mov ah,9
+    int 21h
+    call paper_wait
+    pop ax
+    ret
+rc_print endp
+
+; Print the receipt counter as a zero-padded 4-digit number
+print_ref proc
+    push ax
+    push bx
+    push cx
+    push dx
+    
+    mov ax,rcpt_ref
+    mov bx,10
+    mov cx,4
+ref_div:
+    xor dx,dx
+    div bx
+    add dl,'0'
+    push dx
+    loop ref_div
+    
+    mov cx,4
+ref_out:
+    pop dx
+    mov ah,2
+    int 21h
+    loop ref_out
+    
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+print_ref endp
+
+; Ask whether to print a receipt for the transaction just completed
+offer_receipt proc
+    push ax
+    push dx
+    
+    mov ah,9
+    lea dx,rc_ask
+    int 21h
+    
+    mov ah,1
+    int 21h
+    cmp al,'y'
+    je do_receipt
+    cmp al,'Y'
+    jne skip_receipt
+do_receipt:
+    call print_receipt
+skip_receipt:
+    pop dx
+    pop ax
+    ret
+offer_receipt endp
+
+; Print the receipt for the last transaction
+print_receipt proc
+    push ax
+    push dx
+    
+    call clear_screen
+    
+    lea dx,rc_edge
+    call rc_print
+    lea dx,rc_title1
+    call rc_print
+    lea dx,rc_title2
+    call rc_print
+    lea dx,rc_rule
+    call rc_print
+    lea dx,rc_date
+    call rc_print
+    lea dx,rc_card
+    call rc_print
+    
+    ; Ref : MTM-0001
+    lea dx,rc_ref
+    mov ah,9
+    int 21h
+    call print_ref
+    call paper_wait
+    
+    ; Type : WITHDRAWAL / DEPOSIT / TRANSFER
+    lea dx,rc_type
+    mov ah,9
+    int 21h
+    mov dx,rcpt_type
+    call rc_print
+    
+    ; Amount : 500 Shimmers
+    lea dx,rc_amount
+    mov ah,9
+    int 21h
+    mov ax,rcpt_amount
+    call format_number
+    call paper_wait
+    
+    ; To Acct : ******7890 (transfers only)
+    cmp rcpt_is_xfer,0
+    je rc_no_dest
+    lea dx,rc_dest
+    mov ah,9
+    int 21h
+    mov dx,offset acc_buffer
+    add dx,6                    ; show only the last 4 digits
+    call rc_print
+rc_no_dest:
+    
+    ; Balance : 24,500 Shimmers
+    lea dx,rc_bal
+    mov ah,9
+    int 21h
+    call format_balance
+    call paper_wait
+    
+    lea dx,rc_rule
+    call rc_print
+    lea dx,rc_thanks
+    call rc_print
+    lea dx,rc_cat
+    call rc_print
+    lea dx,rc_edge
+    call rc_print
+    
+    inc rcpt_ref                ; next receipt gets the next number
+    
+    pop dx
+    pop ax
+    ret
+print_receipt endp
 
 display_header proc
     push ax
@@ -653,10 +886,10 @@ transfer:
     int 21h
 
      ; Get account number
-    mov ah,1
     xor si,si       ; Clear SI for counting digits
 
 get_account:
+    mov ah,1        ; Read character with echo
     int 21h
     cmp al,13       ; Check for Enter key
     je verify_acc   ; If Enter, verify account
@@ -666,6 +899,7 @@ get_account:
     cmp al,'9'
     ja invalid_acc
     
+    mov acc_buffer[si],al   ; Remember digit for the receipt
     inc si          ; Count digits
     cmp si,10       ; Max 10 digits for account number
     je verify_acc
@@ -673,8 +907,8 @@ get_account:
     jmp get_account
     
 verify_acc:
-    cmp si,0        ; Check if any digits were entered
-    je invalid_acc
+    cmp si,10       ; Account number must be exactly 10 digits
+    jne invalid_acc
     
     mov ah,9
     lea dx,newline
@@ -743,15 +977,15 @@ get_transfer_amount:
     
     sub al,'0'          ; Convert ASCII to number
     mov ah,0
-    push ax             ; Save digit
+    mov bx,ax           ; Keep digit in BX
     
-    ; Multiply current amount by 10
+    ; Multiply current amount by 10 (CF set on 16-bit overflow)
     mov ax,word ptr temp_balance
     mul ten
+    jc insufficient_transfer
+    add ax,bx           ; Add new digit
+    jc insufficient_transfer
     mov word ptr temp_balance,ax
-    
-    pop ax              ; Retrieve digit
-    add word ptr temp_balance,ax  ; Add new digit
     
     inc si
     cmp si,5           ; Max 5 digits (25000)
@@ -760,9 +994,15 @@ get_transfer_amount:
 process_transfer:
     mov ax,word ptr temp_balance
     
+    ; Reject zero-value transfers
+    cmp ax,0
+    je zero_transfer
+    
     ; Check if amount <= current balance
     cmp ax,current_balance_value
     ja insufficient_transfer
+    
+    mov rcpt_amount,ax  ; remember for the receipt
     
     ; Subtract from current balance
     sub current_balance_value,ax
@@ -793,7 +1033,18 @@ process_transfer:
     lea dx,header_line
     int 21h
     
+    mov rcpt_type, offset t_transfer
+    mov rcpt_is_xfer, 1
+    call offer_receipt
     jmp option
+
+zero_transfer:
+    call clear_screen
+    mov ah,9
+    lea dx,zero_amount_msg
+    int 21h
+    call wait_2s
+    jmp transfer_amount
     
 insufficient_transfer:
     call clear_screen
