@@ -98,19 +98,19 @@
 
     ; Receipt text (printed one line at a time, like paper from a slot)
     rc_ask    db 10,13,10,13,'Print receipt? (Y/N): $'
-    rc_edge   db 10,13,' ====================================$'
-    rc_title1 db 10,13,'       NEKO CHARTERED RECEIPT$'
-    rc_title2 db 10,13,'      ~ Meow Teller Machine ~$'
-    rc_rule   db 10,13,' ------------------------------------$'
-    rc_date   db 10,13,' Date    : 1970-01-01 12:00:00 AM$'
-    rc_card   db 10,13,' Card    : Xayna$'
-    rc_ref    db 10,13,' Ref     : MTM-$'
-    rc_type   db 10,13,' Type    : $'
-    rc_amount db 10,13,' Amount  : $'
-    rc_dest   db 10,13,' To Acct : ******$'
-    rc_bal    db 10,13,' Balance : $'
-    rc_thanks db 10,13,'   Thank you for purring with us.$'
-    rc_cat    db 10,13,'               =^.^=$' 
+    rc_edge   db 10,13,'                      ====================================$'
+    rc_title1 db 10,13,'                            NEKO CHARTERED RECEIPT$'
+    rc_title2 db 10,13,'                           ~ Meow Teller Machine ~$'
+    rc_rule   db 10,13,'                      ------------------------------------$'
+    rc_date   db 10,13,'                      Date    : 1970-01-01 12:00:00 AM$'
+    rc_card   db 10,13,'                      Card    : Xayna$'
+    rc_ref    db 10,13,'                      Ref     : MTM-$'
+    rc_type   db 10,13,'                      Type    : $'
+    rc_amount db 10,13,'                      Amount  : $'
+    rc_dest   db 10,13,'                      To Acct : ******$'
+    rc_bal    db 10,13,'                      Balance : $'
+    rc_thanks db 10,13,'                        Thank you for purring with us.$'
+    rc_cat    db 10,13,'                                    =^.^=$' 
  .code   
 clear_screen proc
     push ax         ; Save registers
@@ -761,6 +761,12 @@ print_receipt proc
     push dx
     
     call clear_screen
+    
+    ; Start a few rows down so the receipt sits mid-screen
+    mov ah,2
+    mov bh,0
+    mov dx,0400h        ; row 4, column 0
+    int 10h
     
     lea dx,rc_edge
     call rc_print
